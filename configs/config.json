@@ -1,0 +1,12 @@
+{
+  "http": [
+    "https://example.com",
+    "https://httpbin.org/status/200",
+    "https://httpbin.org/status/404"
+  ],
+  "tcp": [
+    "127.0.0.1:22",
+    "example.com:80"
+  ]
+}
+

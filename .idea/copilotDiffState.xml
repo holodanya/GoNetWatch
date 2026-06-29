@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="/types (snapshot).go">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="/types (snapshot).go" />
+              <option name="originalContent" value="package models&#10;&#10;import &quot;time&quot;&#10;&#10;// MonitorResult holds the result of a single monitor check&#10;type MonitorResult struct {&#10;&#9;Target  string        `json:&quot;target&quot;`&#10;&#9;Status  string        `json:&quot;status&quot;`&#10;&#9;Code    int           `json:&quot;code&quot;`&#10;&#9;Latency time.Duration `json:&quot;latency&quot;`&#10;&#9;Error   string        `json:&quot;error&quot;`&#10;&#9;Success bool          `json:&quot;success&quot;`&#10;}&#10;&#10;// Target represents a single endpoint to monitor&#10;type Target struct {&#10;&#9;Protocol    string `json:&quot;protocol&quot;`&#10;&#9;Address     string `json:&quot;address&quot;`&#10;&#9;IntervalSec int    `json:&quot;interval_sec&quot;` // interval in seconds between checks&#10;}&#10;&#10;// Config represents the JSON configuration file structure&#10;type Config struct {&#10;&#9;HTTP []string `json:&quot;http&quot;`&#10;&#9;TCP  []string `json:&quot;tcp&quot;`&#10;}&#10;" />
+              <option name="updatedContent" value="package models&#10;&#10;import &quot;time&quot;&#10;&#10;// MonitorResult holds the result of a single monitor check&#10;type MonitorResult struct {&#10;&#9;Target  string        `json:&quot;target&quot;`&#10;&#9;Protocol string       `json:&quot;protocol&quot;`&#10;&#9;Status  string        `json:&quot;status&quot;`&#10;&#9;Code    int           `json:&quot;code&quot;`&#10;&#9;Latency time.Duration `json:&quot;latency&quot;`&#10;&#9;Error   string        `json:&quot;error&quot;`&#10;&#9;Success bool          `json:&quot;success&quot;`&#10;}&#10;&#10;// Target represents a single endpoint to monitor&#10;type Target struct {&#10;&#9;// Type indicates the type of check to perform: &quot;http&quot;, &quot;http-head&quot;, &quot;tcp&quot;, etc.&#10;&#9;Type        string `json:&quot;type&quot;`&#10;&#9;// Protocol is kept for backward compatibility; it's typically the same as Type.&#10;&#9;Protocol    string `json:&quot;protocol&quot;`&#10;&#9;Address     string `json:&quot;address&quot;`&#10;&#9;IntervalSec int    `json:&quot;interval_sec&quot;` // interval in seconds between checks&#10;}&#10;&#10;// Config represents the JSON configuration file structure&#10;type Config struct {&#10;&#9;HTTP []string `json:&quot;http&quot;`&#10;&#9;TCP  []string `json:&quot;tcp&quot;`&#10;}&#10;" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

@@ -1,0 +1,68 @@
+# GoNetWatch example configuration.
+# Copy to config.yaml and edit before starting the stack.
+
+targets:
+  # ── HTTP checks ──────────────────────────────────────────────────────────────
+
+  # Full GET request (use when HEAD is not supported)
+  - name: "Example.com HTTP"
+    type: "http"
+    protocol: "http"
+    address: "https://example.com"
+    interval_sec: 30
+
+  # Lightweight HEAD request (no response body downloaded)
+  - name: "Google HTTP HEAD"
+    type: "http-head"
+    protocol: "http-head"
+    address: "https://www.google.com"
+    interval_sec: 30
+
+  # HEAD with timeout and retry — shows all optional fields
+  - name: "GitHub HTTP HEAD"
+    type: "http-head"
+    protocol: "http-head"
+    address: "https://github.com"
+    interval_sec: 30
+    timeout_sec: 5      # per-attempt timeout; 0 = default (HTTP: 5s, TCP/DNS: 3s)
+    retries: 1          # extra attempts after first failure; 0 = no retry
+    retry_delay_ms: 500 # ms to wait between retries
+
+  # ── TCP check ────────────────────────────────────────────────────────────────
+
+  - name: "GitHub TCP 443"
+    type: "tcp"
+    protocol: "tcp"
+    address: "github.com:443"
+    interval_sec: 20
+
+  # ── DNS check ────────────────────────────────────────────────────────────────
+
+  - name: "Google DNS via Cloudflare"
+    type: "dns"
+    protocol: "dns"
+    address: "google.com"       # bare domain to resolve (no http:// prefix)
+    resolver: "1.1.1.1:53"     # optional: custom DNS server (omit to use system default)
+    interval_sec: 30
+    timeout_sec: 3
+
+  # ── Test / problem target ─────────────────────────────────────────────────────
+
+  # Always returns 503 — useful to verify alerting and dashboards work correctly
+  - name: "HTTPBin 503 HEAD"
+    type: "http-head"
+    protocol: "http-head"
+    address: "https://httpbin.org/status/503"
+    interval_sec: 30
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+influxdb:
+  url: "http://influxdb:8086"
+  token: ""         # set via INFLUX_TOKEN env var (overrides this field)
+  org: "gonetwatch"
+  bucket: "network_metrics"
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+telegram:
+  bot_token: ""     # set via TELEGRAM_BOT_TOKEN env var
+  chat_ids: []      # set via TELEGRAM_CHAT_IDS env var (comma-separated)

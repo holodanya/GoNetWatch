@@ -1,0 +1,12 @@
+name,type,address,interval_sec,timeout_sec,retries,retry_delay_ms,resolver
+Example HTTP HEAD,http-head,https://example.com,60,5,1,300,
+Google HTTP HEAD,http-head,https://www.google.com,60,5,1,300,
+GitHub HTTP HEAD,http-head,https://github.com,60,5,1,300,
+Wikipedia HTTP HEAD,http-head,https://www.wikipedia.org,60,5,1,300,
+Cloudflare HTTP HEAD,http-head,https://www.cloudflare.com,60,5,1,300,
+Grafana HTTP HEAD,http-head,https://grafana.com,60,5,1,300,
+Go Dev HTTP HEAD,http-head,https://go.dev,60,5,1,300,
+GitHub TCP 443,tcp,github.com:443,30,3,1,300,
+Google DNS via Cloudflare,dns,google.com,30,3,1,300,1.1.1.1:53
+HTTPBin Delay 5s,http,https://httpbin.org/delay/5,30,2,1,500,
+HTTPBin 503 HEAD,http-head,https://httpbin.org/status/503,60,5,0,300,

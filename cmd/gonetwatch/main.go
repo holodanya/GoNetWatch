@@ -2,58 +2,99 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"flag"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	cfgpkg "GoNetWatch/internal/config"
+	"GoNetWatch/internal/importer"
 	"GoNetWatch/internal/monitor"
 	"GoNetWatch/internal/notifier"
 	"GoNetWatch/internal/storage"
 )
 
 func main() {
-	cfg, err := cfgpkg.LoadConfig("configs/config.yaml")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
+	if len(os.Args) > 1 && os.Args[1] == "import-targets" {
+		fs := flag.NewFlagSet("import-targets", flag.ExitOnError)
+		input := fs.String("input", "", "input file path (required)")
+		output := fs.String("output", "configs/config.yaml", "output config file path")
+		defaultType := fs.String("default-type", "http-head", "default target type: http, http-head, tcp, dns")
+		interval := fs.Int("interval", 30, "default interval_sec for imported targets")
+		timeout := fs.Int("timeout", 0, "default timeout_sec for imported targets")
+		retries := fs.Int("retries", 0, "default retries for imported targets")
+		retryDelayMS := fs.Int("retry-delay-ms", 300, "default retry_delay_ms for imported targets")
+		appendMode := fs.Bool("append", true, "append to existing config instead of replacing")
+		dryRun := fs.Bool("dry-run", false, "print what would be done without writing files")
+		_ = fs.Parse(os.Args[2:])
+
+		opts := importer.ImportOptions{
+			Input:        *input,
+			Output:       *output,
+			DefaultType:  *defaultType,
+			Interval:     *interval,
+			Timeout:      *timeout,
+			Retries:      *retries,
+			RetryDelayMS: *retryDelayMS,
+			Append:       *appendMode,
+			DryRun:       *dryRun,
+		}
+		if err := importer.Run(opts); err != nil {
+			slog.Error("import-targets failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		return
+	}
+
+	configPath := "configs/config.yaml"
+	if p := os.Getenv("CONFIG_PATH"); p != "" {
+		configPath = p
+	}
+	cfg, err := cfgpkg.LoadConfig(configPath)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		slog.Error("Failed to load config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
-	// Initialize storage (InfluxDB) if configured — do it immediately after loading config
+	if err := cfgpkg.Validate(cfg); err != nil {
+		slog.Error("Invalid configuration", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	if err := storage.Init(cfg.InfluxDB); err != nil {
-		fmt.Printf("Error initializing storage: %v\n", err)
+		slog.Error("Failed to initialize storage", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	defer storage.Close()
 
-	// Initialize notifier (Telegram) if configured
 	var notif notifier.Notifier
 	if cfg.Telegram.BotToken != "" && len(cfg.Telegram.ChatIDs) > 0 {
 		notif = notifier.NewTelegramNotifier(cfg.Telegram)
 	}
 
-	// Use targets directly from config (each target should specify type, address, interval_sec)
 	targets := cfg.Targets
 
 	if len(targets) == 0 {
-		fmt.Println("No targets found in configs/config.yaml (expected 'targets' array)")
+		slog.Error("No targets found in configs/config.yaml (expected 'targets' array)")
 		os.Exit(1)
 	}
 
-	// Send OnStart notification if notifier is configured
+	slog.Info("GoNetWatch starting", slog.Int("targets", len(targets)))
+
 	if notif != nil {
 		if err := notif.OnStart(len(targets)); err != nil {
-			fmt.Printf("Error sending start notification: %v\n", err)
+			slog.Error("Failed to send start notification", slog.String("error", err.Error()))
 		}
 	}
 
-	// Create a cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Run monitor in background
 	done := make(chan struct{})
 	go func() {
 		monitor.MonitorTargets(ctx, targets, notif)
@@ -65,23 +106,21 @@ func main() {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	sig := <-sigCh
-	fmt.Printf("Received signal %v — shutting down...\n", sig)
+	slog.Info("Received shutdown signal", slog.String("signal", sig.String()))
 
-	// Send OnStop notification if notifier is configured
 	if notif != nil {
 		if err := notif.OnStop(); err != nil {
-			fmt.Printf("Error sending stop notification: %v\n", err)
+			slog.Error("Failed to send stop notification", slog.String("error", err.Error()))
 		}
 	}
 
-	// Signal monitor to stop
 	cancel()
 
 	// Wait for monitor to finish
 	select {
 	case <-done:
-		fmt.Println("Shutdown complete.")
+		slog.Info("Shutdown complete")
 	case <-time.After(15 * time.Second):
-		fmt.Println("Timeout waiting for shutdown; exiting.")
+		slog.Warn("Timeout waiting for shutdown; exiting")
 	}
 }

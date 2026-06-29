@@ -2,41 +2,45 @@ package models
 
 import "time"
 
-// MonitorResult holds the result of a single monitor check
+// MonitorResult carries the outcome of a single check attempt.
 type MonitorResult struct {
-	Target   string        `yaml:"target"`
-	Protocol string        `yaml:"protocol"`
-	Status   string        `yaml:"status"`
-	Code     int           `yaml:"code"`
-	Latency  time.Duration `yaml:"latency"`
-	Error    string        `yaml:"error"`
-	Success  bool          `yaml:"success"`
+	// Identity — stamped by checkTarget from the Target config.
+	Name     string `yaml:"name"`     // human-readable name (InfluxDB "target" tag)
+	Target   string `yaml:"target"`   // technical address: URL, host:port, or domain
+	Protocol string `yaml:"protocol"` // check type: http, http-head, tcp, dns
+	Resolver string `yaml:"resolver"` // DNS resolver used (dns type only)
+
+	// Measurement data
+	Status        string        `yaml:"status"`
+	Code          int           `yaml:"code"`
+	Latency       time.Duration `yaml:"latency"`
+	Error         string        `yaml:"error"`
+	Success       bool          `yaml:"success"`
+	Attempts      int           `yaml:"attempts"`
+	ResolvedCount int           `yaml:"resolved_count"` // IPs resolved (dns type only)
 }
 
-// Target represents a single endpoint to monitor
+// Target represents a single monitoring check defined in config.yaml.
 type Target struct {
-	// Name is a human-readable identifier for this target
-	Name string `yaml:"name"`
-	// Type indicates the type of check to perform: "http", "http-head", "tcp", etc.
-	Type string `yaml:"type"`
-	// Protocol is kept for backward compatibility; it's typically the same as Type.
-	Protocol string `yaml:"protocol"`
-	// Address is the target URL or host:port
-	Address     string `yaml:"address"`
-	IntervalSec int    `yaml:"interval_sec"` // interval in seconds between checks
+	Name         string `yaml:"name"`
+	Type         string `yaml:"type"`
+	Protocol     string `yaml:"protocol"` // equals Type in practice; kept for YAML backward-compat
+	Address      string `yaml:"address"`
+	IntervalSec  int    `yaml:"interval_sec"`   // seconds between checks
+	TimeoutSec   int    `yaml:"timeout_sec"`    // 0 = protocol default (http:5s, tcp/dns:3s)
+	Retries      int    `yaml:"retries"`        // additional attempts on failure; 0 = no retry
+	RetryDelayMs int    `yaml:"retry_delay_ms"` // ms between retries; 0 = default 300ms
+	Resolver     string `yaml:"resolver"`       // DNS server as host:port (dns type only)
 }
 
-// Config represents the YAML configuration file structure
+// Config is the root structure of configs/config.yaml.
 type Config struct {
-	// Targets is the list of targets to monitor. Each entry maps to models.Target
-	Targets []Target `yaml:"targets"`
-	// InfluxDB contains configuration for writing metrics to InfluxDB v2
+	Targets  []Target       `yaml:"targets"`
 	InfluxDB InfluxDBConfig `yaml:"influxdb"`
-	// Telegram contains configuration for Telegram notifications
 	Telegram TelegramConfig `yaml:"telegram"`
 }
 
-// InfluxDBConfig holds connection info for InfluxDB v2
+// InfluxDBConfig holds connection parameters for InfluxDB v2.
 type InfluxDBConfig struct {
 	URL    string `yaml:"url"`
 	Token  string `yaml:"token"`
@@ -44,7 +48,7 @@ type InfluxDBConfig struct {
 	Bucket string `yaml:"bucket"`
 }
 
-// TelegramConfig holds configuration for Telegram bot notifications
+// TelegramConfig holds Telegram bot notification parameters.
 type TelegramConfig struct {
 	BotToken string   `yaml:"bot_token"`
 	ChatIDs  []string `yaml:"chat_ids"`

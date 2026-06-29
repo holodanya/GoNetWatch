@@ -1,0 +1,5 @@
+https://example.com
+https://www.google.com
+github.com:443
+google.com
+instagram.com

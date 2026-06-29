@@ -2,10 +2,9 @@ package monitor
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,28 +13,98 @@ import (
 	"GoNetWatch/internal/storage"
 )
 
-// checkTarget performs an HTTP GET request for HTTP targets. Non-HTTP
-// protocols are currently reported as unsupported.
-func checkTarget(t models.Target) models.MonitorResult {
+// resolveTimeout returns the per-attempt timeout: explicit config value, or 3s for tcp/dns and 5s for http*.
+func resolveTimeout(t models.Target) time.Duration {
+	if t.TimeoutSec > 0 {
+		return time.Duration(t.TimeoutSec) * time.Second
+	}
+	switch t.Type {
+	case "tcp", "dns":
+		return 3 * time.Second
+	default:
+		return 5 * time.Second
+	}
+}
+
+// targetKey returns a composite key (name|protocol|address) unique per logical target.
+func targetKey(name, protocol, address string) string {
+	return name + "|" + protocol + "|" + address
+}
+
+// checkDNS resolves t.Address using the configured or system DNS resolver.
+// If t.Resolver is set, a custom net.Resolver dials that server directly;
+// otherwise the process-default resolver is used.
+func checkDNS(t models.Target, timeout time.Duration) models.MonitorResult {
 	result := models.MonitorResult{
 		Target:   t.Address,
 		Protocol: t.Type,
 	}
 
-	// Use a consistent timeout for all checks
-	timeout := 10 * time.Second
+	var r *net.Resolver
+	if t.Resolver != "" {
+		r = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "udp", t.Resolver)
+			},
+		}
+	} else {
+		r = net.DefaultResolver
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	start := time.Now()
+	addrs, err := r.LookupHost(ctx, t.Address)
+	result.Latency = time.Since(start)
+
+	if err != nil {
+		result.Status = "FAILURE"
+		result.Error = err.Error()
+		return result
+	}
+	if len(addrs) == 0 {
+		result.Status = "FAILURE"
+		result.Error = "no addresses resolved"
+		return result
+	}
+
+	result.Success = true
+	result.Status = "SUCCESS"
+	result.ResolvedCount = len(addrs)
+	return result
+}
+
+// attemptCheck performs exactly one probe of the target with the given timeout.
+// It does not handle retries; that is the sole responsibility of checkTarget.
+func attemptCheck(t models.Target, timeout time.Duration) models.MonitorResult {
+	result := models.MonitorResult{
+		Target:   t.Address,
+		Protocol: t.Type,
+	}
 
 	switch t.Type {
-	case "http":
-		client := &http.Client{Timeout: timeout}
-		start := time.Now()
-		resp, err := client.Get(t.Address)
-		result.Latency = time.Since(start)
+	case "http", "http-head":
+		method := http.MethodGet
+		if t.Type == "http-head" {
+			method = http.MethodHead
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, method, t.Address, nil)
 		if err != nil {
-			result.Success = false
 			result.Status = "FAILURE"
 			result.Error = err.Error()
-			result.Code = 0
+			return result
+		}
+		client := &http.Client{}
+		start := time.Now()
+		resp, err := client.Do(req)
+		result.Latency = time.Since(start)
+		if err != nil {
+			result.Status = "FAILURE"
+			result.Error = err.Error()
 			return result
 		}
 		defer resp.Body.Close()
@@ -44,136 +113,159 @@ func checkTarget(t models.Target) models.MonitorResult {
 			result.Success = true
 			result.Status = "SUCCESS"
 		} else {
-			result.Success = false
-			result.Status = "FAILURE"
-		}
-
-	case "http-head":
-		// HEAD is more efficient than GET for uptime checks because it
-		// retrieves only the response headers and not the full body, which
-		// reduces bandwidth and latency when you only need status information.
-		client := &http.Client{Timeout: timeout}
-		start := time.Now()
-		resp, err := client.Head(t.Address)
-		result.Latency = time.Since(start)
-		if err != nil {
-			result.Success = false
-			result.Status = "FAILURE"
-			result.Error = err.Error()
-			result.Code = 0
-			return result
-		}
-		defer resp.Body.Close()
-		result.Code = resp.StatusCode
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			result.Success = true
-			result.Status = "SUCCESS"
-		} else {
-			result.Success = false
 			result.Status = "FAILURE"
 		}
 
 	case "tcp":
-		// For TCP we measure the time to establish a connection to the
-		// remote host:port. If DialTimeout succeeds the port is open.
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		var d net.Dialer
 		start := time.Now()
-		conn, err := net.DialTimeout("tcp", t.Address, timeout)
+		conn, err := d.DialContext(ctx, "tcp", t.Address)
 		result.Latency = time.Since(start)
 		if err != nil {
-			result.Success = false
 			result.Status = "FAILURE"
 			result.Error = err.Error()
-			result.Code = 0
 			return result
 		}
 		result.Success = true
 		result.Status = "SUCCESS"
-		result.Code = 0
 		if conn != nil {
 			conn.Close()
 		}
 
+	case "dns":
+		return checkDNS(t, timeout)
+
 	default:
-		result.Success = false
 		result.Status = "FAILURE"
 		result.Error = "unsupported protocol"
-		result.Code = 0
-		return result
 	}
 
 	return result
 }
 
-func printResult(result models.MonitorResult) {
-	// ANSI color codes
-	const (
-		colorGreen = "\033[32m"
-		colorRed   = "\033[31m"
-		colorReset = "\033[0m"
-	)
+// checkTarget probes t, retrying on failure up to t.Retries additional times.
+// The returned result reflects the last attempt and carries the Attempts count.
+func checkTarget(t models.Target) models.MonitorResult {
+	timeout := resolveTimeout(t)
 
-	// Timestamp in HH:MM:SS
-	ts := time.Now().Format("15:04:05")
-
-	// Format status tag with color
-	var statusTag string
-	if result.Success {
-		statusTag = fmt.Sprintf("%s[SUCCESS]%s", colorGreen, colorReset)
-	} else {
-		statusTag = fmt.Sprintf("%s[FAILURE]%s", colorRed, colorReset)
+	maxAttempts := 1 + t.Retries
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	}
 
-	protoTag := ""
-	if result.Protocol != "" {
-		protoTag = fmt.Sprintf("[%s]", strings.ToUpper(result.Protocol))
+	retryDelay := time.Duration(t.RetryDelayMs) * time.Millisecond
+	if retryDelay <= 0 {
+		retryDelay = 300 * time.Millisecond
 	}
 
-	if result.Success {
-		if result.Code > 0 {
-			fmt.Printf("[%s] %s %s Target: %s | Status: %d | Latency: %dms\n",
-				ts, statusTag, protoTag, result.Target, result.Code, result.Latency.Milliseconds())
-		} else {
-			// e.g., TCP success (no HTTP status code)
-			fmt.Printf("[%s] %s %s Target: %s | Latency: %dms\n",
-				ts, statusTag, protoTag, result.Target, result.Latency.Milliseconds())
+	var result models.MonitorResult
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result = attemptCheck(t, timeout)
+		result.Attempts = attempt
+		if result.Success {
+			break
 		}
-	} else {
-		if result.Code == 0 {
-			fmt.Printf("[%s] %s %s Target: %s | Error: %s%s%s\n",
-				ts, statusTag, protoTag, result.Target, colorRed, result.Error, colorReset)
-		} else {
-			fmt.Printf("[%s] %s %s Target: %s | Status: %d | Latency: %dms\n",
-				ts, statusTag, protoTag, result.Target, result.Code, result.Latency.Milliseconds())
+		if attempt < maxAttempts {
+			time.Sleep(retryDelay)
 		}
 	}
+	// Stamp identity so downstream consumers (logging, InfluxDB, state maps) don't need a reverse lookup.
+	result.Name = t.Name
+	result.Resolver = t.Resolver
+	return result
 }
 
-// MonitorTargets runs checks for each target periodically until the provided
-// context is canceled. Each target runs in its own goroutine; results are sent
-// to a printer goroutine which runs until resultsChan is closed.
-// Uses a state machine to detect UP/DOWN transitions and prevent alert spam.
+// logResult logs a check result: Info on success, Error on failure.
+func logResult(result models.MonitorResult) {
+	if result.Success {
+		args := []any{
+			slog.String("target", result.Name),
+			slog.String("address", result.Target),
+			slog.String("protocol", result.Protocol),
+			slog.Int("code", result.Code),
+			slog.Duration("latency", result.Latency),
+			slog.Int("attempts", result.Attempts),
+		}
+		if result.Protocol == "dns" {
+			args = append(args, slog.Int("resolved_count", result.ResolvedCount))
+		}
+		slog.Info("Target check successful", args...)
+		return
+	}
+
+	slog.Error("Target check failed",
+		slog.String("target", result.Name),
+		slog.String("address", result.Target),
+		slog.String("protocol", result.Protocol),
+		slog.Int("code", result.Code),
+		slog.String("error", result.Error),
+		slog.Int("attempts", result.Attempts),
+	)
+}
+
+// handleResult logs the result, fires UP/DOWN transition alerts, and writes the metric to InfluxDB.
+func handleResult(result models.MonitorResult, targetMap map[string]models.Target, targetStates map[string]bool, notif notifier.Notifier) bool {
+	logResult(result)
+
+	// Stable key: unique per logical target even when the same address is
+	// probed via different protocols (e.g. TCP and DNS both for github.com).
+	key := targetKey(result.Name, result.Protocol, result.Target)
+	target, known := targetMap[key]
+
+	// Detect state transitions and notify only on changes to avoid alert spam.
+	prevState, exists := targetStates[key]
+	if !exists {
+		prevState = true // default to UP if not tracked
+	}
+
+	if prevState && !result.Success {
+		if known && notif != nil {
+			if err := notif.OnStateChange(target, result, false); err != nil {
+				slog.Error("Failed to send notification",
+					slog.String("target", result.Name),
+					slog.String("error", err.Error()))
+			}
+		}
+		targetStates[key] = false
+	} else if !prevState && result.Success {
+		if known && notif != nil {
+			if err := notif.OnStateChange(target, result, true); err != nil {
+				slog.Error("Failed to send notification",
+					slog.String("target", result.Name),
+					slog.String("error", err.Error()))
+			}
+		}
+		targetStates[key] = true
+	}
+
+	// Write metric asynchronously to InfluxDB (no-op if not configured)
+	storage.WriteMetric(result)
+
+	return result.Success
+}
+
+// MonitorTargets runs periodic checks for all targets until ctx is canceled, one goroutine per target.
 func MonitorTargets(ctx context.Context, targets []models.Target, notif notifier.Notifier) {
 	var wg sync.WaitGroup
 	// buffer to reduce blocking; allow some backlog
 	resultsChan := make(chan models.MonitorResult, len(targets)*4)
 
-	fmt.Println("========== Network Monitoring System ==========")
-	fmt.Printf("Starting monitoring of %d target(s)...\n", len(targets))
-	fmt.Println("==============================================")
-	fmt.Println()
+	slog.Info("Starting network monitoring", slog.Int("targets", len(targets)))
 
 	startTime := time.Now()
 
-	// Build a map of targets indexed by their address for easy lookup
+	// Index targets by composite key; prevents collisions when the same address appears in multiple protocols.
 	targetMap := make(map[string]models.Target)
 	for _, t := range targets {
-		targetMap[t.Address] = t
+		targetMap[targetKey(t.Name, t.Type, t.Address)] = t
 	}
 
 	// Initialize target states: all targets start as UP (true)
 	targetStates := make(map[string]bool)
 	for _, t := range targets {
-		targetStates[t.Address] = true
+		targetStates[targetKey(t.Name, t.Type, t.Address)] = true
 	}
 
 	// Printer goroutine: read results continuously until context is cancelled
@@ -184,95 +276,37 @@ func MonitorTargets(ctx context.Context, targets []models.Target, notif notifier
 		successCount := 0
 		failureCount := 0
 
+		count := func(success bool) {
+			if success {
+				successCount++
+			} else {
+				failureCount++
+			}
+		}
+
+		summary := func() {
+			slog.Info("Monitoring completed",
+				slog.Duration("duration", time.Since(startTime)),
+				slog.Int("successful", successCount),
+				slog.Int("failed", failureCount))
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
 				// Context cancelled: drain remaining results then exit
 				for result := range resultsChan {
-					printResult(result)
-					// Check for state transitions and notify
-					prevState, exists := targetStates[result.Target]
-					if !exists {
-						prevState = true // default to UP if not tracked
-					}
-					if prevState && !result.Success {
-						// Transition to DOWN
-						if target, ok := targetMap[result.Target]; ok && notif != nil {
-							if err := notif.OnStateChange(target, result, false); err != nil {
-								fmt.Printf("Error sending notification: %v\n", err)
-							}
-						}
-						targetStates[result.Target] = false
-					} else if !prevState && result.Success {
-						// Transition to UP
-						if target, ok := targetMap[result.Target]; ok && notif != nil {
-							if err := notif.OnStateChange(target, result, true); err != nil {
-								fmt.Printf("Error sending notification: %v\n", err)
-							}
-						}
-						targetStates[result.Target] = true
-					}
-					// persist metric for drained results as well (no-op if storage not initialized)
-					storage.WriteMetric(result)
-					if result.Success {
-						successCount++
-					} else {
-						failureCount++
-					}
+					count(handleResult(result, targetMap, targetStates, notif))
 				}
-
-				totalTime := time.Since(startTime)
-				fmt.Println()
-				fmt.Println("==============================================")
-				fmt.Printf("Monitoring completed in %dms\n", totalTime.Milliseconds())
-				fmt.Printf("Summary: %d successful | %d failed\n", successCount, failureCount)
-				fmt.Println("==============================================")
+				summary()
 				return
 
 			case result, ok := <-resultsChan:
 				if !ok {
-					// Channel closed: print summary and exit
-					totalTime := time.Since(startTime)
-					fmt.Println()
-					fmt.Println("==============================================")
-					fmt.Printf("Monitoring completed in %dms\n", totalTime.Milliseconds())
-					fmt.Printf("Summary: %d successful | %d failed\n", successCount, failureCount)
-					fmt.Println("==============================================")
+					summary()
 					return
 				}
-				printResult(result)
-
-				// Check for state transitions and notify only on changes
-				prevState, exists := targetStates[result.Target]
-				if !exists {
-					prevState = true // default to UP if not tracked
-				}
-
-				if prevState && !result.Success {
-					// Transition to DOWN
-					if target, ok := targetMap[result.Target]; ok && notif != nil {
-						if err := notif.OnStateChange(target, result, false); err != nil {
-							fmt.Printf("Error sending notification: %v\n", err)
-						}
-					}
-					targetStates[result.Target] = false
-				} else if !prevState && result.Success {
-					// Transition to UP
-					if target, ok := targetMap[result.Target]; ok && notif != nil {
-						if err := notif.OnStateChange(target, result, true); err != nil {
-							fmt.Printf("Error sending notification: %v\n", err)
-						}
-					}
-					targetStates[result.Target] = true
-				}
-
-				// Write metric asynchronously to InfluxDB (no-op if not configured)
-				storage.WriteMetric(result)
-				if result.Success {
-					successCount++
-				} else {
-					failureCount++
-				}
+				count(handleResult(result, targetMap, targetStates, notif))
 			}
 		}
 	}()
@@ -316,6 +350,5 @@ func MonitorTargets(ctx context.Context, targets []models.Target, notif notifier
 	// the printer goroutine can finish.
 	wg.Wait()
 	close(resultsChan)
-	// Wait for the printer to finish printing the remaining results
 	printerWg.Wait()
 }

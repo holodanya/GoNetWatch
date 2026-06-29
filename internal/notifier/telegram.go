@@ -4,18 +4,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"GoNetWatch/internal/models"
 )
 
-// TelegramNotifier sends notifications via Telegram bot to multiple chat IDs
+// TelegramNotifier sends notifications via Telegram bot to multiple chat IDs.
 type TelegramNotifier struct {
 	botToken string
 	chatIDs  []string
 }
 
-// NewTelegramNotifier creates a new TelegramNotifier instance
+// NewTelegramNotifier creates a new TelegramNotifier instance.
 func NewTelegramNotifier(cfg models.TelegramConfig) *TelegramNotifier {
 	return &TelegramNotifier{
 		botToken: cfg.BotToken,
@@ -23,19 +24,16 @@ func NewTelegramNotifier(cfg models.TelegramConfig) *TelegramNotifier {
 	}
 }
 
-// OnStateChange sends a Telegram notification when a target's state changes
-// Broadcasts to all configured chat IDs
+// OnStateChange sends a Telegram notification when a target's state changes.
 func (tn *TelegramNotifier) OnStateChange(target models.Target, result models.MonitorResult, isUp bool) error {
 	var message string
 
 	if isUp {
-		// Target came back online
 		message = fmt.Sprintf("✅ *RESOLVED: %s*\n\n", target.Name)
 		message += fmt.Sprintf("*Address:* `%s`\n", target.Address)
 		message += fmt.Sprintf("*Status:* Back online!\n")
 		message += fmt.Sprintf("*Latency:* `%dms`\n", result.Latency.Milliseconds())
 	} else {
-		// Target went down
 		message = fmt.Sprintf("🚨 *DOWN: %s*\n\n", target.Name)
 		message += fmt.Sprintf("*Address:* `%s`\n", target.Address)
 		if result.Error != "" {
@@ -47,26 +45,23 @@ func (tn *TelegramNotifier) OnStateChange(target models.Target, result models.Mo
 		message += fmt.Sprintf("*Latency:* `%dms`\n", result.Latency.Milliseconds())
 	}
 
-	// Broadcast to all chat IDs
 	return tn.broadcastMessage(message)
 }
 
-// OnStart sends a notification when the monitoring service starts
-// Broadcasts to all configured chat IDs
+// OnStart sends a notification when the monitoring service starts.
 func (tn *TelegramNotifier) OnStart(targetCount int) error {
 	message := fmt.Sprintf("🟢 *GoNetWatch Started*\n\nMonitoring %d target(s).", targetCount)
 	return tn.broadcastMessage(message)
 }
 
-// OnStop sends a notification when the monitoring service stops
-// Broadcasts to all configured chat IDs
+// OnStop sends a notification when the monitoring service stops.
 func (tn *TelegramNotifier) OnStop() error {
 	message := "🔴 *GoNetWatch Stopped*\n\nMonitoring gracefully shut down."
 	return tn.broadcastMessage(message)
 }
 
-// broadcastMessage sends a message to all configured chat IDs
-// Logs errors for individual sends but continues broadcasting to others
+// broadcastMessage sends a message to all configured chat IDs.
+// Logs per-chat errors but continues; succeeds if at least one chat received the message.
 func (tn *TelegramNotifier) broadcastMessage(text string) error {
 	if tn.botToken == "" || len(tn.chatIDs) == 0 {
 		return fmt.Errorf("telegram bot token or chat IDs are not configured")
@@ -75,23 +70,25 @@ func (tn *TelegramNotifier) broadcastMessage(text string) error {
 	var lastErr error
 	successCount := 0
 
-	// Send to each chat ID
 	for _, chatID := range tn.chatIDs {
 		err := tn.sendMessageToChatID(chatID, text)
 		if err != nil {
-			fmt.Printf("Error sending message to chat ID %s: %v\n", chatID, err)
+			slog.Error("Failed to send Telegram alert",
+				slog.String("chat_id", chatID),
+				slog.String("error", err.Error()))
 			lastErr = err
 		} else {
 			successCount++
 		}
 	}
 
-	// Report overall success if at least one chat received the message
 	if successCount > 0 {
+		slog.Info("Telegram alert sent",
+			slog.Int("delivered", successCount),
+			slog.Int("chats", len(tn.chatIDs)))
 		return nil
 	}
 
-	// All sends failed
 	if lastErr != nil {
 		return fmt.Errorf("failed to send message to all %d chat ID(s): %w", len(tn.chatIDs), lastErr)
 	}
@@ -99,25 +96,21 @@ func (tn *TelegramNotifier) broadcastMessage(text string) error {
 	return nil
 }
 
-// sendMessageToChatID sends a message to a specific chat ID
+// sendMessageToChatID sends a message to a specific chat ID.
 func (tn *TelegramNotifier) sendMessageToChatID(chatID, text string) error {
-	// Build the Telegram API endpoint
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", tn.botToken)
 
-	// Create the request payload
 	payload := map[string]string{
 		"chat_id":    chatID,
 		"text":       text,
 		"parse_mode": "Markdown",
 	}
 
-	// Marshal payload to JSON
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshaling telegram payload: %w", err)
 	}
 
-	// Send the HTTP POST request
 	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return fmt.Errorf("sending telegram message: %w", err)
@@ -126,7 +119,6 @@ func (tn *TelegramNotifier) sendMessageToChatID(chatID, text string) error {
 		_ = resp.Body.Close()
 	}()
 
-	// Check if the request was successful
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("telegram API returned status code %d", resp.StatusCode)
 	}

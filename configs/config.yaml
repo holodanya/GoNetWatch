@@ -1,30 +1,207 @@
 targets:
-  - name: "Example Website"
-    type: "http"
-    protocol: "http"
-    address: "https://example.com"
-    interval_sec: 30
-  
-  - name: "HTTPBin Service"
-    type: "http-head"
-    protocol: "http-head"
-    address: "https://httpbin.org/status/200"
-    interval_sec: 15
-  
-  - name: "DNS Server (1.1.1.1:53)"
-    type: "tcp"
-    protocol: "tcp"
-    address: "1.1.1.1:53"
-    interval_sec: 10
-
+    - name: Example.com HTTP
+      type: http
+      protocol: http
+      address: https://example.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Google HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://www.google.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: GitHub HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://github.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Grafana HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://grafana.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: InfluxData HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://www.influxdata.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Docker HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://www.docker.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Go.dev HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://go.dev
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Wikipedia HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://www.wikipedia.org
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Stack Overflow HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://stackoverflow.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Cloudflare DNS TCP
+      type: tcp
+      protocol: tcp
+      address: 1.1.1.1:53
+      interval_sec: 20
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Google DNS TCP
+      type: tcp
+      protocol: tcp
+      address: 8.8.8.8:53
+      interval_sec: 20
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: GitHub TCP 443
+      type: tcp
+      protocol: tcp
+      address: github.com:443
+      interval_sec: 20
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Google DNS via Cloudflare
+      type: dns
+      protocol: dns
+      address: google.com
+      interval_sec: 30
+      timeout_sec: 3
+      retries: 1
+      retry_delay_ms: 300
+      resolver: 1.1.1.1:53
+    - name: GitHub DNS via Google
+      type: dns
+      protocol: dns
+      address: github.com
+      interval_sec: 30
+      timeout_sec: 3
+      retries: 1
+      retry_delay_ms: 300
+      resolver: 8.8.8.8:53
+    - name: Broken DNS Domain
+      type: dns
+      protocol: dns
+      address: this-domain-should-not-exist-123456789.com
+      interval_sec: 30
+      timeout_sec: 3
+      retries: 0
+      retry_delay_ms: 0
+      resolver: 1.1.1.1:53
+    - name: Broken DNS Resolver
+      type: dns
+      protocol: dns
+      address: google.com
+      interval_sec: 30
+      timeout_sec: 2
+      retries: 1
+      retry_delay_ms: 300
+      resolver: 192.0.2.1:53
+    - name: HTTPBin 200 HEAD
+      type: http-head
+      protocol: http-head
+      address: https://httpbin.org/status/200
+      interval_sec: 15
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: HTTPBin Delay 5s
+      type: http
+      protocol: http
+      address: https://httpbin.org/delay/5
+      interval_sec: 15
+      timeout_sec: 2
+      retries: 1
+      retry_delay_ms: 500
+      resolver: ""
+    - name: HTTPBin 503 HEAD
+      type: http-head
+      protocol: http-head
+      address: https://httpbin.org/status/503
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 0
+      resolver: ""
+    - name: Example HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://example.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 300
+      resolver: ""
+    - name: Google HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://google.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 300
+      resolver: ""
+    - name: Instagram HTTP HEAD
+      type: http-head
+      protocol: http-head
+      address: https://instagram.com
+      interval_sec: 30
+      timeout_sec: 0
+      retries: 0
+      retry_delay_ms: 300
+      resolver: ""
 influxdb:
-  url: "http://localhost:8086"
-  token: "INFLUX_TOKEN"
-  org: "gonetwatch"
-  bucket: "network_metrics"
-
+    url: http://influxdb:8086
+    token: INFLUX_TOKEN
+    org: gonetwatch
+    bucket: network_metrics
 telegram:
-  bot_token: ""
-  chat_ids: []
-
-
+    bot_token: ""
+    chat_ids: []

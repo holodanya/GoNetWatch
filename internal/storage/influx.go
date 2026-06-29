@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"fmt"
+	"log/slog"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -20,19 +20,16 @@ var (
 // If cfg.URL is empty, initialization is skipped.
 func Init(cfg models.InfluxDBConfig) error {
 	if cfg.URL == "" || cfg.Token == "" || cfg.Org == "" || cfg.Bucket == "" {
-		// No InfluxDB configured; skip initialization
 		return nil
 	}
 
 	client = influxdb2.NewClient(cfg.URL, cfg.Token)
 	writeAPI = client.WriteAPI(cfg.Org, cfg.Bucket)
 
-	// capture errors from the async write API
 	errCh = writeAPI.Errors()
 	go func() {
 		for err := range errCh {
-			// Log async write errors; don't crash the process
-			fmt.Printf("[INFLUX] write error: %v\n", err)
+			slog.Error("InfluxDB write error", slog.String("error", err.Error()))
 		}
 	}()
 
@@ -40,31 +37,44 @@ func Init(cfg models.InfluxDBConfig) error {
 }
 
 // WriteMetric writes a single MonitorResult to InfluxDB asynchronously.
-// It is non-blocking (uses WriteAPI). If Init wasn't called, this is a no-op.
+// Non-blocking (uses WriteAPI). No-op if Init was not called.
 func WriteMetric(result models.MonitorResult) {
 	if writeAPI == nil {
 		return
 	}
 
-	// Prepare point
-	measurement := "network_latency"
+	targetName := result.Name
+	if targetName == "" {
+		targetName = result.Target
+	}
 	tags := map[string]string{
-		"target":   result.Target,
+		"target":   targetName,
+		"address":  result.Target,
 		"protocol": result.Protocol,
 	}
-	fields := map[string]interface{}{}
-	fields["latency_ms"] = result.Latency.Milliseconds()
-	fields["status_code"] = result.Code
-	fields["success"] = result.Success
+	if result.Protocol == "dns" && result.Resolver != "" {
+		tags["resolver"] = result.Resolver
+	}
 
-	p := influxdb2.NewPoint(measurement, tags, fields, time.Now())
+	fields := map[string]interface{}{
+		"success":    result.Success,
+		"latency_ms": result.Latency.Milliseconds(),
+		"attempts":   result.Attempts,
+	}
+	if result.Code > 0 {
+		fields["status_code"] = result.Code
+	}
+	if result.Protocol == "dns" {
+		fields["resolved_count"] = result.ResolvedCount
+	}
+
+	p := influxdb2.NewPoint("network_latency", tags, fields, time.Now())
 	writeAPI.WritePoint(p)
 }
 
 // Close flushes pending writes and closes the InfluxDB client.
 func Close() {
 	if writeAPI != nil {
-		// Flush any pending writes
 		writeAPI.Flush()
 	}
 	if client != nil {

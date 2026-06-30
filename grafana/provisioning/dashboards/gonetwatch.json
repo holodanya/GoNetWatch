@@ -5,8 +5,8 @@
     "name": "gonetwatch-main",
     "namespace": "default",
     "uid": "3c84b59d-37a9-4f6d-8275-8434dd8b1c73",
-    "resourceVersion": "1782745412421016",
-    "generation": 3,
+    "resourceVersion": "1782828993617999",
+    "generation": 7,
     "creationTimestamp": "2026-06-29T13:29:57Z",
     "labels": {
       "grafana.app/deprecatedInternalID": "4434746113060864"
@@ -16,11 +16,11 @@
       "grafana.app/folder": "afqlmnqvb1zb4e",
       "grafana.app/managedBy": "classic-file-provisioning",
       "grafana.app/managerId": "GoNetWatch",
-      "grafana.app/sourceChecksum": "50d6ab5e819e5276a753f480edcbbe5b",
+      "grafana.app/sourceChecksum": "2e1519e49f186ddf0ef66af375fe5162",
       "grafana.app/sourcePath": "/etc/grafana/provisioning/dashboards/gonetwatch.json",
-      "grafana.app/sourceTimestamp": "1782745407000",
+      "grafana.app/sourceTimestamp": "1782828962000",
       "grafana.app/updatedBy": "access-policy:service",
-      "grafana.app/updatedTimestamp": "2026-06-29T15:03:32Z",
+      "grafana.app/updatedTimestamp": "2026-06-30T14:16:33Z",
       "grafana.app/folderTitle": "GoNetWatch",
       "grafana.app/folderUrl": "/dashboards/f/afqlmnqvb1zb4e/gonetwatch"
     }
@@ -901,7 +901,7 @@
       "network"
     ],
     "timeSettings": {
-      "autoRefresh": "5m",
+      "autoRefresh": "2h",
       "autoRefreshIntervals": [
         "5s",
         "10s",
@@ -915,7 +915,7 @@
         "1d"
       ],
       "fiscalYearStartMonth": 0,
-      "from": "now-5m",
+      "from": "now-3h",
       "hideTimepicker": false,
       "timezone": "browser",
       "to": "now"
@@ -932,7 +932,7 @@
               "$__all"
             ]
           },
-          "definition": "import \"influxdata/influxdb/schema\"\r\n\r\nschema.tagValues(\r\n  bucket: \"network_metrics\",\r\n  tag: \"target\",\r\n  predicate: (r) => r[\"_measurement\"] == \"network_latency\" and r[\"_field\"] == \"success\",\r\n  start: -10m\r\n)",
+          "definition": "import \"influxdata/influxdb/schema\"\r\n\r\nschema.tagValues(\r\n  bucket: \"network_metrics\",\r\n  tag: \"target\",\r\n  predicate: (r) => r[\"_measurement\"] == \"network_latency\" and r[\"_field\"] == \"success\",\r\n  start: -1h\r\n)",
           "hide": "dontHide",
           "includeAll": true,
           "label": "Choose target",
@@ -1098,7 +1098,7 @@
               "149": "\r",
               "150": "\n",
               "151": ")",
-              "query": "import \"influxdata/influxdb/schema\"\r\n\r\nschema.tagValues(\r\n  bucket: \"network_metrics\",\r\n  tag: \"target\",\r\n  predicate: (r) => r[\"_measurement\"] == \"network_latency\" and r[\"_field\"] == \"success\",\r\n  start: -10m\r\n)"
+              "query": "import \"influxdata/influxdb/schema\"\r\n\r\nschema.tagValues(\r\n  bucket: \"network_metrics\",\r\n  tag: \"target\",\r\n  predicate: (r) => r[\"_measurement\"] == \"network_latency\" and r[\"_field\"] == \"success\",\r\n  start: -1h\r\n)"
             },
             "version": "v0"
           },

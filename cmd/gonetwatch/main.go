@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -73,7 +74,11 @@ func main() {
 	defer storage.Close()
 
 	var notif notifier.Notifier
-	if cfg.Telegram.BotToken != "" && len(cfg.Telegram.ChatIDs) > 0 {
+	if strings.TrimSpace(cfg.Telegram.BotToken) == "" {
+		slog.Info("Telegram notifications disabled")
+	} else if len(cfg.Telegram.ChatIDs) == 0 {
+		slog.Info("Telegram notifications disabled")
+	} else {
 		notif = notifier.NewTelegramNotifier(cfg.Telegram)
 	}
 

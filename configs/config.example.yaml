@@ -55,6 +55,14 @@ targets:
     address: "https://httpbin.org/status/503"
     interval_sec: 30
 
+  # Protected example: some endpoints intentionally return 403 (forbidden)
+  - name: "Protected Example"
+    type: "http-head"
+    protocol: "http-head"
+    address: "https://example.com"
+    interval_sec: 30
+    expected_statuses: [200, 403]
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 influxdb:
   url: "http://influxdb:8086"

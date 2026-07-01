@@ -122,6 +122,7 @@ func main() {
 	cancel()
 
 	// Wait for monitor to finish
+
 	select {
 	case <-done:
 		slog.Info("Shutdown complete")

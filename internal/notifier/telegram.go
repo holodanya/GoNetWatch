@@ -57,7 +57,6 @@ func (tn *TelegramNotifier) OnStateChange(target models.Target, result models.Mo
 		}
 		message += fmt.Sprintf("*Latency:* `%dms`\n", result.Latency.Milliseconds())
 	}
-
 	tn.enqueue(message)
 	return nil
 }

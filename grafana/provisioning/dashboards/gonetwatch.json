@@ -904,7 +904,7 @@
       "autoRefresh": "2h",
       "autoRefreshIntervals": [
         "5s",
-        "10s",
+        "15s",
         "30s",
         "1m",
         "5m",

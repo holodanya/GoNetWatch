@@ -31,6 +31,10 @@ type Target struct {
 	Retries      int    `yaml:"retries"`        // additional attempts on failure; 0 = no retry
 	RetryDelayMs int    `yaml:"retry_delay_ms"` // ms between retries; 0 = default 300ms
 	Resolver     string `yaml:"resolver"`       // DNS server as host:port (dns type only)
+	// ExpectedStatuses is an optional list of HTTP status codes that should be
+	// considered successful for http and http-head targets. If empty or nil,
+	// the default behaviour of 2xx/3xx being success applies.
+	ExpectedStatuses []int `yaml:"expected_statuses"`
 }
 
 // Config is the root structure of configs/config.yaml.

@@ -6,26 +6,39 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"GoNetWatch/internal/models"
 )
+
+const telegramQueueSize = 100
 
 // TelegramNotifier sends notifications via Telegram bot to multiple chat IDs.
 type TelegramNotifier struct {
 	botToken string
 	chatIDs  []string
+	messages chan string
 }
 
 // NewTelegramNotifier creates a new TelegramNotifier instance.
 func NewTelegramNotifier(cfg models.TelegramConfig) *TelegramNotifier {
-	return &TelegramNotifier{
-		botToken: cfg.BotToken,
-		chatIDs:  cfg.ChatIDs,
+	tn := &TelegramNotifier{
+		botToken: strings.TrimSpace(cfg.BotToken),
+		chatIDs:  normalizeChatIDs(cfg.ChatIDs),
+		messages: make(chan string, telegramQueueSize),
 	}
+
+	go tn.dispatch()
+
+	return tn
 }
 
 // OnStateChange sends a Telegram notification when a target's state changes.
 func (tn *TelegramNotifier) OnStateChange(target models.Target, result models.MonitorResult, isUp bool) error {
+	if !tn.enabled() {
+		return nil
+	}
+
 	var message string
 
 	if isUp {
@@ -44,27 +57,68 @@ func (tn *TelegramNotifier) OnStateChange(target models.Target, result models.Mo
 		}
 		message += fmt.Sprintf("*Latency:* `%dms`\n", result.Latency.Milliseconds())
 	}
-
-	return tn.broadcastMessage(message)
+	tn.enqueue(message)
+	return nil
 }
 
 // OnStart sends a notification when the monitoring service starts.
 func (tn *TelegramNotifier) OnStart(targetCount int) error {
+	if !tn.enabled() {
+		return nil
+	}
+
 	message := fmt.Sprintf("🟢 *GoNetWatch Started*\n\nMonitoring %d target(s).", targetCount)
-	return tn.broadcastMessage(message)
+	tn.enqueue(message)
+	return nil
 }
 
 // OnStop sends a notification when the monitoring service stops.
 func (tn *TelegramNotifier) OnStop() error {
+	if !tn.enabled() {
+		return nil
+	}
+
 	message := "🔴 *GoNetWatch Stopped*\n\nMonitoring gracefully shut down."
-	return tn.broadcastMessage(message)
+	tn.enqueue(message)
+	return nil
+}
+
+func normalizeChatIDs(chatIDs []string) []string {
+	normalized := make([]string, 0, len(chatIDs))
+	for _, chatID := range chatIDs {
+		chatID = strings.TrimSpace(chatID)
+		if chatID != "" {
+			normalized = append(normalized, chatID)
+		}
+	}
+	return normalized
+}
+
+func (tn *TelegramNotifier) enabled() bool {
+	return tn != nil && tn.botToken != "" && len(tn.chatIDs) > 0 && tn.messages != nil
+}
+
+func (tn *TelegramNotifier) enqueue(message string) {
+	select {
+	case tn.messages <- message:
+	default:
+		slog.Warn("Telegram notification queue is full; dropping message")
+	}
+}
+
+func (tn *TelegramNotifier) dispatch() {
+	for message := range tn.messages {
+		if err := tn.broadcastMessage(message); err != nil {
+			slog.Error("Failed to send Telegram notification", slog.String("error", err.Error()))
+		}
+	}
 }
 
 // broadcastMessage sends a message to all configured chat IDs.
 // Logs per-chat errors but continues; succeeds if at least one chat received the message.
 func (tn *TelegramNotifier) broadcastMessage(text string) error {
-	if tn.botToken == "" || len(tn.chatIDs) == 0 {
-		return fmt.Errorf("telegram bot token or chat IDs are not configured")
+	if !tn.enabled() {
+		return nil
 	}
 
 	var lastErr error

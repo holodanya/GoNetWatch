@@ -11,15 +11,18 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	cfgpkg "GoNetWatch/internal/config"
 	"GoNetWatch/internal/models"
+
 	"gopkg.in/yaml.v3"
 )
 
+// ImportOptions configures target import behavior.
 type ImportOptions struct {
 	Input        string
 	Output       string
@@ -32,6 +35,7 @@ type ImportOptions struct {
 	DryRun       bool
 }
 
+// Run imports monitoring targets from a text or CSV file into a YAML config.
 func Run(opts ImportOptions) error {
 	if opts.Input == "" {
 		return errors.New("--input is required")
@@ -76,10 +80,12 @@ func Run(opts ImportOptions) error {
 		key := dedupeKey(target)
 		if _, ok := existing[key]; ok {
 			skipped = append(skipped, target)
+			statusKey := normalizeExpectedStatuses(target.ExpectedStatuses)
 			slog.Info("skipped duplicate",
 				slog.String("type", target.Type),
 				slog.String("address", target.Address),
 				slog.String("resolver", target.Resolver),
+				slog.String("expected_statuses", statusKey),
 			)
 			continue
 		}
@@ -233,14 +239,15 @@ func parseCSV(opts ImportOptions) ([]models.Target, error) {
 
 func parseCSVHeaders(headers []string) (map[string]int, error) {
 	allowed := map[string]struct{}{
-		"name":           {},
-		"type":           {},
-		"address":        {},
-		"interval_sec":   {},
-		"timeout_sec":    {},
-		"retries":        {},
-		"retry_delay_ms": {},
-		"resolver":       {},
+		"name":              {},
+		"type":              {},
+		"address":           {},
+		"interval_sec":      {},
+		"timeout_sec":       {},
+		"retries":           {},
+		"retry_delay_ms":    {},
+		"resolver":          {},
+		"expected_statuses": {},
 	}
 
 	columns := make(map[string]int, len(headers))
@@ -302,17 +309,47 @@ func targetFromCSVRecord(record []string, columns map[string]int, opts ImportOpt
 		name = generateName(address, targetType)
 	}
 
+	expectedStatuses, err := csvOptionalExpectedStatuses(record, columns, "expected_statuses")
+	if err != nil {
+		return models.Target{}, err
+	}
+
 	return models.Target{
-		Name:         name,
-		Type:         targetType,
-		Protocol:     targetType,
-		Address:      address,
-		IntervalSec:  interval,
-		TimeoutSec:   timeout,
-		Retries:      retries,
-		RetryDelayMs: retryDelayMS,
-		Resolver:     resolver,
+		Name:             name,
+		Type:             targetType,
+		Protocol:         targetType,
+		Address:          address,
+		IntervalSec:      interval,
+		TimeoutSec:       timeout,
+		Retries:          retries,
+		RetryDelayMs:     retryDelayMS,
+		Resolver:         resolver,
+		ExpectedStatuses: expectedStatuses,
 	}, nil
+}
+
+// csvOptionalExpectedStatuses parses a semicolon-separated list of HTTP status
+// codes from the CSV record column name. Returns nil if the column is absent
+// or empty.
+func csvOptionalExpectedStatuses(record []string, columns map[string]int, name string) ([]int, error) {
+	value := csvValue(record, columns, name)
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ";")
+	var out []int
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("%s must be semicolon-separated integers, got %q", name, value)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func targetFromLine(line string, opts ImportOptions) (models.Target, error) {
@@ -405,8 +442,35 @@ func isPort(value string) bool {
 	return err == nil && port > 0 && port <= 65535
 }
 
+// normalizeExpectedStatuses converts expected_statuses into a canonical string
+// representation for duplicate detection. Returns "default" if nil/empty,
+// or a comma-separated sorted list of statuses.
+func normalizeExpectedStatuses(statuses []int) string {
+	if len(statuses) == 0 {
+		return "default"
+	}
+	// Create a copy and sort to ensure [200,403] and [403,200] match
+	sorted := make([]int, len(statuses))
+	copy(sorted, statuses)
+	slices.Sort(sorted)
+
+	// Convert to comma-separated string
+	parts := make([]string, len(sorted))
+	for i, code := range sorted {
+		parts[i] = strconv.Itoa(code)
+	}
+	return strings.Join(parts, ",")
+}
+
 func dedupeKey(target models.Target) string {
-	return target.Type + "\x00" + target.Address + "\x00" + target.Resolver
+	// For HTTP/http-head, include normalized expected_statuses in the key
+	if target.Type == "http" || target.Type == "http-head" {
+		statusKey := normalizeExpectedStatuses(target.ExpectedStatuses)
+		return target.Type + "\x00" + target.Address + "\x00" + target.Resolver + "\x00" + statusKey
+	}
+	// For tcp/dns, use the same format with a normalized (empty) status key
+	statusKey := normalizeExpectedStatuses(nil)
+	return target.Type + "\x00" + target.Address + "\x00" + target.Resolver + "\x00" + statusKey
 }
 
 func generateName(address, targetType string) string {
@@ -485,8 +549,9 @@ func printDryRun(added, skipped []models.Target, total int) {
 		fmt.Fprintln(os.Stdout, "  (none)")
 	}
 	for _, target := range added {
-		fmt.Fprintf(os.Stdout, "  - name=%q type=%s protocol=%s address=%s resolver=%s\n",
-			target.Name, target.Type, target.Protocol, target.Address, target.Resolver)
+		statusKey := normalizeExpectedStatuses(target.ExpectedStatuses)
+		fmt.Fprintf(os.Stdout, "  - name=%q type=%s protocol=%s address=%s resolver=%s expected_statuses=%s\n",
+			target.Name, target.Type, target.Protocol, target.Address, target.Resolver, statusKey)
 	}
 
 	fmt.Fprintln(os.Stdout, "Skipped duplicates:")
@@ -494,8 +559,9 @@ func printDryRun(added, skipped []models.Target, total int) {
 		fmt.Fprintln(os.Stdout, "  (none)")
 	}
 	for _, target := range skipped {
-		fmt.Fprintf(os.Stdout, "  - name=%q type=%s address=%s resolver=%s\n",
-			target.Name, target.Type, target.Address, target.Resolver)
+		statusKey := normalizeExpectedStatuses(target.ExpectedStatuses)
+		fmt.Fprintf(os.Stdout, "  - name=%q type=%s address=%s resolver=%s expected_statuses=%s\n",
+			target.Name, target.Type, target.Address, target.Resolver, statusKey)
 	}
 
 	fmt.Fprintf(os.Stdout, "Total targets after import: %d\n", total)

@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -108,12 +109,37 @@ func attemptCheck(t models.Target, timeout time.Duration) models.MonitorResult {
 			return result
 		}
 		defer resp.Body.Close()
+		// Always record the received HTTP status code so downstream writers
+		// (InfluxDB) can persist it when present.
 		result.Code = resp.StatusCode
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			result.Success = true
-			result.Status = "SUCCESS"
+
+		// Determine success according to expected_statuses when provided,
+		// otherwise default to HTTP 2xx/3xx being successful (>=200 and <400).
+		if len(t.ExpectedStatuses) > 0 {
+			// Check membership in the explicit expected list
+			ok := false
+			for _, c := range t.ExpectedStatuses {
+				if c == resp.StatusCode {
+					ok = true
+					break
+				}
+			}
+			if ok {
+				result.Success = true
+				result.Status = "SUCCESS"
+			} else {
+				result.Success = false
+				result.Status = "FAILURE"
+				result.Error = fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
+			}
 		} else {
-			result.Status = "FAILURE"
+			// Default behaviour: 2xx and 3xx are success; 4xx/5xx are failures.
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				result.Success = true
+				result.Status = "SUCCESS"
+			} else {
+				result.Status = "FAILURE"
+			}
 		}
 
 	case "tcp":

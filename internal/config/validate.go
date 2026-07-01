@@ -25,8 +25,6 @@ func Validate(cfg models.Config) error {
 		msgs = append(msgs, fmt.Sprintf(format, args...))
 	}
 
-	// --- Targets ---------------------------------------------------------
-
 	if len(cfg.Targets) == 0 {
 		add("targets list is empty")
 	} else {
@@ -86,10 +84,20 @@ func Validate(cfg models.Config) error {
 			if t.RetryDelayMs < 0 {
 				add("%s: retry_delay_ms must not be negative", namedPrefix)
 			}
+
+			// expected_statuses: only allowed for http / http-head; must contain valid HTTP codes
+			if len(t.ExpectedStatuses) > 0 {
+				if t.Type != "http" && t.Type != "http-head" {
+					add("%s: expected_statuses is only allowed for http and http-head targets", namedPrefix)
+				}
+				for _, code := range t.ExpectedStatuses {
+					if code < 100 || code > 599 {
+						add("%s: expected_statuses contains invalid code %d (must be 100..599)", namedPrefix, code)
+					}
+				}
+			}
 		}
 	}
-
-	// --- InfluxDB (optional; skip all checks when URL is unset) ----------
 
 	if cfg.InfluxDB.URL != "" {
 		if cfg.InfluxDB.Org == "" {
@@ -105,8 +113,6 @@ func Validate(cfg models.Config) error {
 			add("influxdb.token is empty (set INFLUX_TOKEN env var or add it to config)")
 		}
 	}
-
-	// --- Telegram (fully optional; no validation required) ---------------
 
 	if len(msgs) == 0 {
 		return nil
